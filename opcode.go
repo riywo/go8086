@@ -242,7 +242,7 @@ func (op *Opcode) Run(vm *VM) {
 		for {
 			op.following.Run(vm)
 			CX.Write(vm, CX.Read(vm)-1)
-			if CX.Read(vm) == 0 || vm.GetFlag(ZF) {
+			if CX.Read(vm) == 0 || vm.GetFlag(ZF) == 1 {
 				return
 			}
 		}
@@ -251,7 +251,7 @@ func (op *Opcode) Run(vm *VM) {
 		if f != nil {
 			f(op, vm)
 		} else {
-			fmt.Printf("Not implemented: %s\n", op.Disasm())
+			fmt.Fprintf(os.Stderr, "Not implemented: %s\n", op.Disasm())
 			os.Exit(1)
 		}
 	}

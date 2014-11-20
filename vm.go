@@ -2,6 +2,7 @@ package go8086
 
 import (
 	"fmt"
+	"os"
 )
 
 type Flag uint
@@ -19,12 +20,13 @@ const (
 )
 
 type VM struct {
-	reg   map[string]uint16
-	sreg  map[string]uint16
-	ip    uint16
-	flag  uint16
-	memCS Bytes //temporary
-	memDS Bytes //temporary
+	reg    map[string]uint16
+	sreg   map[string]uint16
+	ip     uint16
+	flag   uint16
+	memCS  Bytes  //temporary
+	memDS  Bytes  //temporary
+	initSP uint16 //temporary
 }
 
 func NewVM() (vm *VM) {
@@ -36,7 +38,7 @@ func NewVM() (vm *VM) {
 	for _, reg := range regs[Bit16] {
 		switch reg {
 		case SP:
-			vm.reg[reg.name] = 0xfffe
+			vm.reg[reg.name] = 0xff0e
 		default:
 			vm.reg[reg.name] = 0
 		}
@@ -66,8 +68,8 @@ func (vm *VM) Pop() (value uint16) {
 	return
 }
 
-func (vm *VM) GetFlag(f Flag) bool {
-	return ((vm.flag >> f) & 1) == 1
+func (vm *VM) GetFlag(f Flag) uint16 {
+	return (vm.flag >> f) & 1
 }
 
 func (vm *VM) FlagON(f Flag) {
@@ -75,7 +77,7 @@ func (vm *VM) FlagON(f Flag) {
 }
 
 func (vm *VM) FlagOFF(f Flag) {
-	vm.flag = vm.flag & ((1 << f) ^ 0xff)
+	vm.flag = vm.flag & ((1 << f) ^ 0xffff)
 }
 
 func (vm *VM) SetFlag(f Flag, condition bool) {
@@ -91,24 +93,21 @@ func (vm *VM) getOpcode() (op *Opcode) {
 }
 
 func (vm *VM) Run() {
-	//fmt.Println("                                                                                                                       fffe fffc fffa fff8 fff6 fff4 fff2 fff0 ffee ffec ffea ffe8 ffe6 ffe4 ffe2 ffe0")
+	vm.initSP = vm.reg["sp"]
 	for {
 		op := vm.getOpcode()
-		//	vm.Debug()
+		vm.Debug()
 		vm.ip += uint16(len(op.bytes))
 		op.Run(vm)
 	}
 }
 
 func (vm *VM) Debug() {
-	f := func(fl Flag) int {
-		if vm.GetFlag(fl) {
-			return 1
-		} else {
-			return 0
-		}
+	if !Debug {
+		return
 	}
-	fmt.Printf("%04x AX:%04x CX:%04x DX:%04x BX:%04x SP:%04x BP:%04x SI:%04x DI:%04x O%dD%dI%dT%dS%dZ%dA%dP%dC%d %-30s %s\n",
+	f := vm.GetFlag
+	fmt.Fprintf(os.Stderr, "%04x AX:%04x CX:%04x DX:%04x BX:%04x SP:%04x BP:%04x SI:%04x DI:%04x O%dD%dI%dT%dS%dZ%dA%dP%dC%d %-30s %s\n",
 		vm.ip,
 		vm.reg["ax"], vm.reg["cx"], vm.reg["dx"], vm.reg["bx"],
 		vm.reg["sp"], vm.reg["bp"], vm.reg["si"], vm.reg["di"],
@@ -121,7 +120,7 @@ func (vm *VM) Debug() {
 func (vm *VM) stackSlice() (s []uint16) {
 	top := vm.DS(vm.reg["sp"])
 	for {
-		if len(top) < 2 {
+		if len(top) < 0xffff-int(vm.initSP)+2 {
 			return
 		}
 		s = append(s, top.read16())

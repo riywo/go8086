@@ -74,6 +74,13 @@ func (bs Bytes) write16(value uint16) {
 	bs[1] = byte(value >> 8)
 }
 
+func (bs Bytes) write32(value uint32) {
+	bs[0] = byte(value & 0x00ff)
+	bs[1] = byte(value >> 8)
+	bs[2] = byte(value >> 16)
+	bs[3] = byte(value >> 24)
+}
+
 func (bs Bytes) write8(value uint16) {
 	bs[0] = byte(value & 0x00ff)
 }

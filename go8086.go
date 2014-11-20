@@ -1,5 +1,10 @@
 package go8086
 
+import (
+	"fmt"
+	"os"
+)
+
 type Bit int
 
 const (
@@ -35,4 +40,14 @@ func Run(bs []byte, args []string) {
 	vm.memDS.write(aout.data)
 	MinixStackArgs(vm, args)
 	vm.Run()
+}
+
+var Debug bool = false
+
+func DebugLog(format string, a ...interface{}) {
+	if Debug {
+		fmt.Fprintln(os.Stderr, "")
+		fmt.Fprintf(os.Stderr, "[Debug] "+format, a...)
+		fmt.Fprintln(os.Stderr, "")
+	}
 }

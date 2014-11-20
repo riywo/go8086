@@ -7,41 +7,131 @@ import (
 
 type opcodeRunFunc func(*Opcode, *VM)
 
+//http://stackoverflow.com/a/8037485/2052892
+func CalcADC(a, b, c uint16, w Bit) (res, cf, of uint16) {
+	if w == Bit8 {
+		a &= 0xff
+		b &= 0xff
+	}
+	res = a + b + c
+	cf = 0
+	var max uint16 = 0xffff
+	if w == Bit8 {
+		res &= 0xff
+		max = 0xff
+	}
+	if c == 1 {
+		if a >= max-b {
+			cf = 1
+		}
+	} else {
+		if a > max-b {
+			cf = 1
+		}
+	}
+	of = SignOf(res^a^b, w) ^ cf
+	return
+}
+
 var opcodeRunFuncMap = map[Mnemonic]opcodeRunFunc{
 	ADD: func(op *Opcode, vm *VM) {
 		opr1 := op.opr1.(ReadWritableOperand)
-		old := opr1.Read(vm)
-		res := old + op.opr2.(ReadableOperand).Read(vm)
+		opr2 := op.opr2.(ReadableOperand)
+		w := opr1.Bit()
+		a, b := opr1.Read(vm), opr2.Read(vm)
+		res, cf, of := CalcADC(a, b, 0, w)
 		opr1.Write(vm, res)
-		vm.SetFlag(CF, old > res)
-		vm.SetFlag(OF, old > res)
-		vm.SetFlag(AF, LSBOf(old) > LSBOf(res))
+		vm.SetFlag(CF, cf == 1)
+		vm.SetFlag(OF, of == 1)
 		vm.SetFlag(ZF, res == 0)
-		vm.SetFlag(SF, SignOf(res, opr1.Bit()))
-		vm.SetFlag(PF, Parity(res))
+		vm.SetFlag(SF, SignOf(res, w) == 1)
+		vm.SetFlag(PF, ParityOf(res) == 1)
+	},
+	ADC: func(op *Opcode, vm *VM) {
+		opr1 := op.opr1.(ReadWritableOperand)
+		opr2 := op.opr2.(ReadableOperand)
+		w := opr1.Bit()
+		a, b := opr1.Read(vm), opr2.Read(vm)
+		res, cf, of := CalcADC(a, b, vm.GetFlag(CF), w)
+		opr1.Write(vm, res)
+		vm.SetFlag(CF, cf == 1)
+		vm.SetFlag(OF, of == 1)
+		vm.SetFlag(ZF, res == 0)
+		vm.SetFlag(SF, SignOf(res, w) == 1)
+		vm.SetFlag(PF, ParityOf(res) == 1)
 	},
 	SUB: func(op *Opcode, vm *VM) {
 		opr1 := op.opr1.(ReadWritableOperand)
-		old := opr1.Read(vm)
-		res := old - op.opr2.(ReadableOperand).Read(vm)
+		opr2 := op.opr2.(ReadableOperand)
+		w := opr1.Bit()
+		a, b := opr1.Read(vm), opr2.Read(vm)
+		res, cf, of := CalcADC(a, ^b, 1, w)
 		opr1.Write(vm, res)
-		vm.SetFlag(CF, old < res)
-		vm.SetFlag(OF, old < res)
-		vm.SetFlag(AF, LSBOf(old) < LSBOf(res))
+		vm.SetFlag(CF, cf == 0)
+		vm.SetFlag(OF, of == 1)
 		vm.SetFlag(ZF, res == 0)
-		vm.SetFlag(SF, SignOf(res, opr1.Bit()))
-		vm.SetFlag(PF, Parity(res))
+		vm.SetFlag(SF, SignOf(res, w) == 1)
+		vm.SetFlag(PF, ParityOf(res) == 1)
+	},
+	SBB: func(op *Opcode, vm *VM) {
+		opr1 := op.opr1.(ReadWritableOperand)
+		opr2 := op.opr2.(ReadableOperand)
+		w := opr1.Bit()
+		a, b := opr1.Read(vm), opr2.Read(vm)
+		res, cf, of := CalcADC(a, ^b, vm.GetFlag(CF)^1, w)
+		opr1.Write(vm, res)
+		vm.SetFlag(CF, cf == 0)
+		vm.SetFlag(OF, of == 1)
+		vm.SetFlag(ZF, res == 0)
+		vm.SetFlag(SF, SignOf(res, w) == 1)
+		vm.SetFlag(PF, ParityOf(res) == 1)
 	},
 	CMP: func(op *Opcode, vm *VM) {
-		opr1 := op.opr1.(ReadableOperand)
-		old := opr1.Read(vm)
-		res := old - op.opr2.(ReadableOperand).Read(vm)
-		vm.SetFlag(CF, old < res)
-		vm.SetFlag(OF, old < res)
-		vm.SetFlag(AF, LSBOf(old) < LSBOf(res))
+		opr1 := op.opr1.(ReadWritableOperand)
+		opr2 := op.opr2.(ReadableOperand)
+		w := opr1.Bit()
+		a, b := opr1.Read(vm), opr2.Read(vm)
+		res, cf, of := CalcADC(a, ^b, 1, w)
+		DebugLog("a: %04x b: %04x res: %04x", a, b, res)
+		vm.SetFlag(CF, cf == 0)
+		vm.SetFlag(OF, of == 1)
 		vm.SetFlag(ZF, res == 0)
-		vm.SetFlag(SF, SignOf(res, opr1.Bit()))
-		vm.SetFlag(PF, Parity(res))
+		vm.SetFlag(SF, SignOf(res, w) == 1)
+		vm.SetFlag(PF, ParityOf(res) == 1)
+	},
+	INC: func(op *Opcode, vm *VM) {
+		opr1 := op.opr1.(ReadWritableOperand)
+		w := opr1.Bit()
+		a, b := opr1.Read(vm), uint16(1)
+		res, _, of := CalcADC(a, b, 0, w)
+		opr1.Write(vm, res)
+		vm.SetFlag(OF, of == 1)
+		vm.SetFlag(ZF, res == 0)
+		vm.SetFlag(SF, SignOf(res, w) == 1)
+		vm.SetFlag(PF, ParityOf(res) == 1)
+	},
+	DEC: func(op *Opcode, vm *VM) {
+		opr1 := op.opr1.(ReadWritableOperand)
+		w := opr1.Bit()
+		a, b := opr1.Read(vm), uint16(1)
+		res, _, of := CalcADC(a, ^b, 1, w)
+		opr1.Write(vm, res)
+		vm.SetFlag(OF, of == 1)
+		vm.SetFlag(ZF, res == 0)
+		vm.SetFlag(SF, SignOf(res, w) == 1)
+		vm.SetFlag(PF, ParityOf(res) == 1)
+	},
+	NEG: func(op *Opcode, vm *VM) {
+		opr1 := op.opr1.(ReadWritableOperand)
+		w := opr1.Bit()
+		a, b := uint16(0), opr1.Read(vm)
+		res, _, of := CalcADC(a, ^b, 1, w)
+		opr1.Write(vm, res)
+		vm.SetFlag(CF, b != 0)
+		vm.SetFlag(OF, of == 1)
+		vm.SetFlag(ZF, res == 0)
+		vm.SetFlag(SF, SignOf(res, w) == 1)
+		vm.SetFlag(PF, ParityOf(res) == 1)
 	},
 	AND: func(op *Opcode, vm *VM) {
 		opr1 := op.opr1.(ReadWritableOperand)
@@ -51,8 +141,8 @@ var opcodeRunFuncMap = map[Mnemonic]opcodeRunFunc{
 		vm.FlagOFF(CF)
 		vm.FlagOFF(OF)
 		vm.SetFlag(ZF, res == 0)
-		vm.SetFlag(SF, SignOf(res, opr1.Bit()))
-		vm.SetFlag(PF, Parity(res))
+		vm.SetFlag(SF, SignOf(res, opr1.Bit()) == 1)
+		vm.SetFlag(PF, ParityOf(res) == 1)
 	},
 	OR: func(op *Opcode, vm *VM) {
 		opr1 := op.opr1.(ReadWritableOperand)
@@ -62,8 +152,8 @@ var opcodeRunFuncMap = map[Mnemonic]opcodeRunFunc{
 		vm.FlagOFF(CF)
 		vm.FlagOFF(OF)
 		vm.SetFlag(ZF, res == 0)
-		vm.SetFlag(SF, SignOf(res, opr1.Bit()))
-		vm.SetFlag(PF, Parity(res))
+		vm.SetFlag(SF, SignOf(res, opr1.Bit()) == 1)
+		vm.SetFlag(PF, ParityOf(res) == 1)
 	},
 	XOR: func(op *Opcode, vm *VM) {
 		opr1 := op.opr1.(ReadWritableOperand)
@@ -73,8 +163,8 @@ var opcodeRunFuncMap = map[Mnemonic]opcodeRunFunc{
 		vm.FlagOFF(CF)
 		vm.FlagOFF(OF)
 		vm.SetFlag(ZF, res == 0)
-		vm.SetFlag(SF, SignOf(res, opr1.Bit()))
-		vm.SetFlag(PF, Parity(res))
+		vm.SetFlag(SF, SignOf(res, opr1.Bit()) == 1)
+		vm.SetFlag(PF, ParityOf(res) == 1)
 	},
 	TEST: func(op *Opcode, vm *VM) {
 		opr1 := op.opr1.(ReadableOperand)
@@ -83,53 +173,44 @@ var opcodeRunFuncMap = map[Mnemonic]opcodeRunFunc{
 		vm.FlagOFF(CF)
 		vm.FlagOFF(OF)
 		vm.SetFlag(ZF, res == 0)
-		vm.SetFlag(SF, SignOf(res, opr1.Bit()))
-		vm.SetFlag(PF, Parity(res))
+		vm.SetFlag(SF, SignOf(res, opr1.Bit()) == 1)
+		vm.SetFlag(PF, ParityOf(res) == 1)
 	},
 	MOV: func(op *Opcode, vm *VM) {
 		opr1 := op.opr1.(WritableOperand)
 		opr2 := op.opr2.(ReadableOperand)
 		opr1.Write(vm, opr2.Read(vm))
 	},
+	XCHG: func(op *Opcode, vm *VM) {
+		opr1 := op.opr1.(ReadWritableOperand)
+		opr2 := op.opr2.(ReadWritableOperand)
+		v1 := opr1.Read(vm)
+		v2 := opr2.Read(vm)
+		opr1.Write(vm, v2)
+		opr2.Write(vm, v1)
+	},
 	LEA: func(op *Opcode, vm *VM) {
 		opr1 := op.opr1.(*Register)
 		opr2 := op.opr2.(*Memory)
 		opr1.Write(vm, opr2.EffectiveAddress(vm))
 	},
-	INC: func(op *Opcode, vm *VM) {
-		opr1 := op.opr1.(ReadWritableOperand)
-		old := opr1.Read(vm)
-		res := old + 1
-		opr1.Write(vm, res)
-		vm.SetFlag(OF, old > res)
-		vm.SetFlag(AF, LSBOf(old) > LSBOf(res))
-		vm.SetFlag(ZF, res == 0)
-		vm.SetFlag(SF, SignOf(res, opr1.Bit()))
-		vm.SetFlag(PF, Parity(res))
-	},
-	DEC: func(op *Opcode, vm *VM) {
-		opr1 := op.opr1.(ReadWritableOperand)
-		old := opr1.Read(vm)
-		res := old - 1
-		opr1.Write(vm, res)
-		vm.SetFlag(OF, old > res)
-		vm.SetFlag(AF, LSBOf(old) > LSBOf(res))
-		vm.SetFlag(ZF, res == 0)
-		vm.SetFlag(SF, SignOf(res, opr1.Bit()))
-		vm.SetFlag(PF, Parity(res))
-	},
 	JNC: func(op *Opcode, vm *VM) {
-		if !vm.GetFlag(CF) {
+		if vm.GetFlag(CF) == 0 {
+			vm.ip += op.opr1.(*Immediate).Read(vm)
+		}
+	},
+	JC: func(op *Opcode, vm *VM) {
+		if vm.GetFlag(CF) == 1 {
 			vm.ip += op.opr1.(*Immediate).Read(vm)
 		}
 	},
 	JNZ: func(op *Opcode, vm *VM) {
-		if !vm.GetFlag(ZF) {
+		if vm.GetFlag(ZF) == 0 {
 			vm.ip += op.opr1.(*Immediate).Read(vm)
 		}
 	},
 	JZ: func(op *Opcode, vm *VM) {
-		if vm.GetFlag(ZF) {
+		if vm.GetFlag(ZF) == 1 {
 			vm.ip += op.opr1.(*Immediate).Read(vm)
 		}
 	},
@@ -143,6 +224,85 @@ var opcodeRunFuncMap = map[Mnemonic]opcodeRunFunc{
 			vm.ip += op.opr1.(*Immediate).Read(vm)
 		}
 	},
+	JNG: func(op *Opcode, vm *VM) {
+		if (vm.GetFlag(ZF) == 1) || (vm.GetFlag(SF) != vm.GetFlag(OF)) {
+			vm.ip += op.opr1.(*Immediate).Read(vm)
+		}
+	},
+	JG: func(op *Opcode, vm *VM) {
+		if (vm.GetFlag(ZF) == 0) && (vm.GetFlag(SF) == vm.GetFlag(OF)) {
+			vm.ip += op.opr1.(*Immediate).Read(vm)
+		}
+	},
+	JA: func(op *Opcode, vm *VM) {
+		if (vm.GetFlag(CF) == 0) && (vm.GetFlag(ZF) == 0) {
+			vm.ip += op.opr1.(*Immediate).Read(vm)
+		}
+	},
+	JNA: func(op *Opcode, vm *VM) {
+		if (vm.GetFlag(CF) == 1) || (vm.GetFlag(ZF) == 1) {
+			vm.ip += op.opr1.(*Immediate).Read(vm)
+		}
+	},
+	MUL: func(op *Opcode, vm *VM) {
+		opr := op.opr1.(ReadableOperand)
+		switch opr.Bit() {
+		case Bit8:
+			src1 := AX.Read(vm)
+			src2 := opr.Read(vm)
+			res := src1 * src2
+			AX.Write(vm, res)
+			vm.SetFlag(CF, res>>4 != 0)
+			vm.SetFlag(OF, res>>4 != 0)
+		case Bit16:
+			src1 := uint32(AX.Read(vm))
+			src2 := uint32(opr.Read(vm))
+			res := src1 * src2
+			AX.Write(vm, uint16(res))
+			DX.Write(vm, uint16(res>>8))
+			vm.SetFlag(CF, res>>8 != 0)
+			vm.SetFlag(OF, res>>8 != 0)
+		}
+	},
+	DIV: func(op *Opcode, vm *VM) {
+		opr := op.opr1.(ReadableOperand)
+		switch opr.Bit() {
+		case Bit8:
+			dividend := AX.Read(vm)
+			divisor := opr.Read(vm)
+			quotient := dividend / divisor
+			remainder := dividend % divisor
+			AL.Write(vm, quotient)
+			AH.Write(vm, remainder)
+		case Bit16:
+			dividend := (uint32(DX.Read(vm)) << 8) | uint32(AX.Read(vm))
+			divisor := uint32(opr.Read(vm))
+			quotient := dividend / divisor
+			remainder := dividend % divisor
+			AX.Write(vm, uint16(quotient))
+			DX.Write(vm, uint16(remainder))
+		}
+	},
+	IDIV: func(op *Opcode, vm *VM) {
+		opr := op.opr1.(ReadableOperand)
+		switch opr.Bit() {
+		case Bit8:
+			dividend := int16(AX.Read(vm))
+			divisor := int16(opr.Read(vm))
+			quotient := dividend / divisor
+			remainder := dividend % divisor
+			AL.Write(vm, uint16(quotient))
+			AH.Write(vm, uint16(remainder))
+		case Bit16:
+			dividend := (int32(DX.Read(vm)) << 8) | int32(AX.Read(vm))
+			divisor := int32(opr.Read(vm))
+			quotient := dividend / divisor
+			remainder := dividend % divisor
+			DebugLog("%08x / %04x = %04x + %04x", dividend, divisor, quotient, remainder)
+			AX.Write(vm, uint16(quotient))
+			DX.Write(vm, uint16(remainder))
+		}
+	},
 	PUSH: func(op *Opcode, vm *VM) {
 		vm.Push(op.opr1.(ReadableOperand).Read(vm))
 	},
@@ -154,10 +314,23 @@ var opcodeRunFuncMap = map[Mnemonic]opcodeRunFunc{
 		vm.ip += op.opr1.(ReadableOperand).Read(vm)
 	},
 	JMP: func(op *Opcode, vm *VM) {
-		vm.ip += op.opr1.(ReadableOperand).Read(vm)
+		if isMemory(op.opr1) || isRegister(op.opr1) {
+			vm.ip = op.opr1.(ReadableOperand).Read(vm)
+		} else {
+			vm.ip += op.opr1.(ReadableOperand).Read(vm)
+		}
 	},
 	RET: func(op *Opcode, vm *VM) {
 		vm.ip = vm.Pop()
+		if isImmediate(op.opr1) {
+			vm.reg["sp"] += op.opr1.(*Immediate).Read(vm)
+		}
+	},
+	LOOP: func(op *Opcode, vm *VM) {
+		vm.reg["cx"] -= 1
+		if vm.reg["cx"] != 0 {
+			vm.ip += op.opr1.(ReadableOperand).Read(vm)
+		}
 	},
 	CLD: func(op *Opcode, vm *VM) {
 		vm.FlagOFF(DF)
@@ -165,18 +338,48 @@ var opcodeRunFuncMap = map[Mnemonic]opcodeRunFunc{
 	SCASB: func(op *Opcode, vm *VM) {
 		opr1 := AL
 		old := opr1.Read(vm)
+		DebugLog("%02x", vm.DS(vm.reg["di"])[0:10])
 		res := old - vm.DS(vm.reg["di"]).read8()
 		vm.SetFlag(CF, old < res)
 		vm.SetFlag(OF, old < res)
-		vm.SetFlag(AF, LSBOf(old) < LSBOf(res))
 		vm.SetFlag(ZF, res == 0)
-		vm.SetFlag(SF, SignOf(res, opr1.Bit()))
-		vm.SetFlag(PF, Parity(res))
-		if vm.GetFlag(DF) {
+		vm.SetFlag(SF, SignOf(res, opr1.Bit()) == 1)
+		vm.SetFlag(PF, ParityOf(res) == 1)
+		if vm.GetFlag(DF) == 1 {
 			DI.Write(vm, DI.Read(vm)-1)
 		} else {
 			DI.Write(vm, DI.Read(vm)+1)
 		}
+	},
+	MOVSB: func(op *Opcode, vm *VM) {
+		vm.DS(vm.reg["di"]).write8(vm.DS(vm.reg["si"]).read8())
+		if vm.GetFlag(DF) == 1 {
+			vm.reg["di"] -= 1
+			vm.reg["si"] -= 1
+		} else {
+			vm.reg["di"] += 1
+			vm.reg["si"] += 1
+		}
+	},
+	MOVSW: func(op *Opcode, vm *VM) {
+		vm.DS(vm.reg["di"]).write16(vm.DS(vm.reg["si"]).read16())
+		if vm.GetFlag(DF) == 1 {
+			vm.reg["di"] -= 2
+			vm.reg["si"] -= 2
+		} else {
+			vm.reg["di"] += 2
+			vm.reg["si"] += 2
+		}
+	},
+	CBW: func(op *Opcode, vm *VM) {
+		src := int8(AL.Read(vm))
+		vm.reg["ax"] = uint16(src)
+	},
+	CWD: func(op *Opcode, vm *VM) {
+		src := int16(AX.Read(vm))
+		dst := int32(src)
+		vm.reg["ax"] = uint16(dst & 0xffff)
+		vm.reg["dx"] = uint16(dst >> 16)
 	},
 	HLT: func(op *Opcode, vm *VM) {
 		panic("HLT")
@@ -193,10 +396,45 @@ var opcodeRunFuncMap = map[Mnemonic]opcodeRunFunc{
 			vm.SetFlag(CF, (old>>15) == 1)
 			vm.SetFlag(OF, (old>>15) != (res>>15))
 			vm.SetFlag(ZF, res == 0)
-			vm.SetFlag(SF, SignOf(res, opr1.Bit()))
-			vm.SetFlag(PF, Parity(res))
+			vm.SetFlag(SF, SignOf(res, opr1.Bit()) == 1)
+			vm.SetFlag(PF, ParityOf(res) == 1)
 		} else {
-			fmt.Printf("Not implemented: %s\n", op.Disasm())
+			fmt.Fprintf(os.Stderr, "Not implemented: %s\n", op.Disasm())
+			os.Exit(1)
+		}
+	},
+	SHR: func(op *Opcode, vm *VM) {
+		opr1 := op.opr1.(ReadWritableOperand)
+		if op.opr2.(*Counter).v == Count1 && isBit16(op.opr1) {
+			old := opr1.Read(vm)
+			res := old >> 1
+			opr1.Write(vm, res)
+			vm.SetFlag(CF, (old&1) == 1)
+			vm.SetFlag(OF, (old>>15) == 1)
+			vm.SetFlag(ZF, res == 0)
+			vm.SetFlag(SF, SignOf(res, opr1.Bit()) == 1)
+			vm.SetFlag(PF, ParityOf(res) == 1)
+		} else {
+			fmt.Fprintf(os.Stderr, "Not implemented: %s\n", op.Disasm())
+			os.Exit(1)
+		}
+	},
+	RCL: func(op *Opcode, vm *VM) {
+		opr1 := op.opr1.(ReadWritableOperand)
+		if op.opr2.(*Counter).v == Count1 && isBit16(op.opr1) {
+			old := opr1.Read(vm)
+			res := old << 1
+			if vm.GetFlag(CF) == 1 {
+				res = res | 1
+			}
+			opr1.Write(vm, res)
+			vm.SetFlag(CF, (old>>15) == 1)
+			vm.SetFlag(OF, (res>>15)^vm.GetFlag(CF) == 1)
+			vm.SetFlag(ZF, res == 0)
+			vm.SetFlag(SF, SignOf(res, opr1.Bit()) == 1)
+			vm.SetFlag(PF, ParityOf(res) == 1)
+		} else {
+			fmt.Fprintf(os.Stderr, "Not implemented: %s\n", op.Disasm())
 			os.Exit(1)
 		}
 	},
