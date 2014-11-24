@@ -89,7 +89,7 @@
 000000FF  268800            mov [es:bx+si],al
 00000102  2E88063412        mov [cs:0x1234],al
 00000107  36894001          mov [ss:bx+si+0x1],ax
-0000010B  3EC60012          mov byte [ds:bx+si],0x12
+0000010B  3EC60212          mov byte [ds:bp+si],0x12
 0000010F  268C9000F0        mov [es:bx+si-0x1000],ss
 00000114  26FF30            push word [es:bx+si]
 00000117  2E8F00            pop word [cs:bx+si]

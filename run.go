@@ -248,20 +248,20 @@ var opcodeRunFuncMap = map[Mnemonic]opcodeRunFunc{
 		opr := op.opr1.(ReadableOperand)
 		switch opr.Bit() {
 		case Bit8:
-			src1 := AX.Read(vm)
+			src1 := AL.Read(vm)
 			src2 := opr.Read(vm)
 			res := src1 * src2
 			AX.Write(vm, res)
-			vm.SetFlag(CF, res>>4 != 0)
-			vm.SetFlag(OF, res>>4 != 0)
+			vm.SetFlag(CF, res>>8 != 0)
+			vm.SetFlag(OF, res>>8 != 0)
 		case Bit16:
 			src1 := uint32(AX.Read(vm))
 			src2 := uint32(opr.Read(vm))
 			res := src1 * src2
 			AX.Write(vm, uint16(res))
-			DX.Write(vm, uint16(res>>8))
-			vm.SetFlag(CF, res>>8 != 0)
-			vm.SetFlag(OF, res>>8 != 0)
+			DX.Write(vm, uint16(res>>16))
+			vm.SetFlag(CF, res>>16 != 0)
+			vm.SetFlag(OF, res>>16 != 0)
 		}
 	},
 	DIV: func(op *Opcode, vm *VM) {
@@ -275,7 +275,7 @@ var opcodeRunFuncMap = map[Mnemonic]opcodeRunFunc{
 			AL.Write(vm, quotient)
 			AH.Write(vm, remainder)
 		case Bit16:
-			dividend := (uint32(DX.Read(vm)) << 8) | uint32(AX.Read(vm))
+			dividend := (uint32(DX.Read(vm)) << 16) | uint32(AX.Read(vm))
 			divisor := uint32(opr.Read(vm))
 			quotient := dividend / divisor
 			remainder := dividend % divisor
@@ -294,11 +294,10 @@ var opcodeRunFuncMap = map[Mnemonic]opcodeRunFunc{
 			AL.Write(vm, uint16(quotient))
 			AH.Write(vm, uint16(remainder))
 		case Bit16:
-			dividend := (int32(DX.Read(vm)) << 8) | int32(AX.Read(vm))
+			dividend := (int32(DX.Read(vm)) << 16) | int32(AX.Read(vm))
 			divisor := int32(opr.Read(vm))
 			quotient := dividend / divisor
 			remainder := dividend % divisor
-			DebugLog("%08x / %04x = %04x + %04x", dividend, divisor, quotient, remainder)
 			AX.Write(vm, uint16(quotient))
 			DX.Write(vm, uint16(remainder))
 		}
@@ -311,7 +310,11 @@ var opcodeRunFuncMap = map[Mnemonic]opcodeRunFunc{
 	},
 	CALL: func(op *Opcode, vm *VM) {
 		vm.Push(vm.ip)
-		vm.ip += op.opr1.(ReadableOperand).Read(vm)
+		if isMemory(op.opr1) || isRegister(op.opr1) {
+			vm.ip = op.opr1.(ReadableOperand).Read(vm)
+		} else {
+			vm.ip += op.opr1.(ReadableOperand).Read(vm)
+		}
 	},
 	JMP: func(op *Opcode, vm *VM) {
 		if isMemory(op.opr1) || isRegister(op.opr1) {
@@ -336,23 +339,41 @@ var opcodeRunFuncMap = map[Mnemonic]opcodeRunFunc{
 		vm.FlagOFF(DF)
 	},
 	SCASB: func(op *Opcode, vm *VM) {
-		opr1 := AL
-		old := opr1.Read(vm)
-		DebugLog("%02x", vm.DS(vm.reg["di"])[0:10])
-		res := old - vm.DS(vm.reg["di"]).read8()
-		vm.SetFlag(CF, old < res)
-		vm.SetFlag(OF, old < res)
+		DebugLog("%02x", vm.ES(vm.reg["di"])[0:10])
+		a, b := AL.Read(vm), vm.ES(vm.reg["di"]).read8()
+		w := Bit8
+		res, cf, of := CalcADC(a, ^b, 1, w)
+		vm.SetFlag(CF, cf == 0)
+		vm.SetFlag(OF, of == 1)
 		vm.SetFlag(ZF, res == 0)
-		vm.SetFlag(SF, SignOf(res, opr1.Bit()) == 1)
+		vm.SetFlag(SF, SignOf(res, w) == 1)
 		vm.SetFlag(PF, ParityOf(res) == 1)
 		if vm.GetFlag(DF) == 1 {
-			DI.Write(vm, DI.Read(vm)-1)
+			vm.reg["di"] -= 1
 		} else {
-			DI.Write(vm, DI.Read(vm)+1)
+			vm.reg["di"] += 1
+		}
+	},
+	CMPSB: func(op *Opcode, vm *VM) {
+		DebugLog("%02x", vm.ES(vm.reg["di"])[0:10])
+		a, b := vm.DS(vm.reg["si"]).read8(), vm.ES(vm.reg["di"]).read8()
+		w := Bit8
+		res, cf, of := CalcADC(a, ^b, 1, w)
+		vm.SetFlag(CF, cf == 0)
+		vm.SetFlag(OF, of == 1)
+		vm.SetFlag(ZF, res == 0)
+		vm.SetFlag(SF, SignOf(res, w) == 1)
+		vm.SetFlag(PF, ParityOf(res) == 1)
+		if vm.GetFlag(DF) == 1 {
+			vm.reg["di"] -= 1
+			vm.reg["si"] -= 1
+		} else {
+			vm.reg["di"] += 1
+			vm.reg["si"] += 1
 		}
 	},
 	MOVSB: func(op *Opcode, vm *VM) {
-		vm.DS(vm.reg["di"]).write8(vm.DS(vm.reg["si"]).read8())
+		vm.ES(vm.reg["di"]).write8(vm.DS(vm.reg["si"]).read8())
 		if vm.GetFlag(DF) == 1 {
 			vm.reg["di"] -= 1
 			vm.reg["si"] -= 1
@@ -362,7 +383,7 @@ var opcodeRunFuncMap = map[Mnemonic]opcodeRunFunc{
 		}
 	},
 	MOVSW: func(op *Opcode, vm *VM) {
-		vm.DS(vm.reg["di"]).write16(vm.DS(vm.reg["si"]).read16())
+		vm.ES(vm.reg["di"]).write16(vm.DS(vm.reg["si"]).read16())
 		if vm.GetFlag(DF) == 1 {
 			vm.reg["di"] -= 2
 			vm.reg["si"] -= 2
@@ -385,39 +406,50 @@ var opcodeRunFuncMap = map[Mnemonic]opcodeRunFunc{
 		panic("HLT")
 	},
 	INT: func(op *Opcode, vm *VM) {
-		CallMINIXSyscall(vm)
+		n := op.opr1.(ReadableOperand).Read(vm)
+		switch n {
+		case 32:
+			CallMINIXSyscall(vm)
+		default:
+			fmt.Fprintf(os.Stderr, "Not implemented: %s\n", op.Disasm())
+			os.Exit(1)
+		}
 	},
 	SHL: func(op *Opcode, vm *VM) {
 		opr1 := op.opr1.(ReadWritableOperand)
-		if op.opr2.(*Counter).v == Count1 && isBit16(op.opr1) {
-			old := opr1.Read(vm)
-			res := old << 1
-			opr1.Write(vm, res)
-			vm.SetFlag(CF, (old>>15) == 1)
-			vm.SetFlag(OF, (old>>15) != (res>>15))
-			vm.SetFlag(ZF, res == 0)
-			vm.SetFlag(SF, SignOf(res, opr1.Bit()) == 1)
-			vm.SetFlag(PF, ParityOf(res) == 1)
-		} else {
-			fmt.Fprintf(os.Stderr, "Not implemented: %s\n", op.Disasm())
-			os.Exit(1)
+		w := opr1.Bit()
+		count := op.opr2.(*Counter).Count(vm)
+		if count == 0 {
+			return
 		}
+		old := opr1.Read(vm) << (count - 1)
+		res := old << 1
+		opr1.Write(vm, res)
+		vm.SetFlag(CF, SignOf(old, w) == 1)
+		if count == 1 {
+			vm.SetFlag(OF, SignOf(res, w)^SignOf(old, w) == 1)
+		}
+		vm.SetFlag(ZF, res == 0)
+		vm.SetFlag(SF, SignOf(res, w) == 1)
+		vm.SetFlag(PF, ParityOf(res) == 1)
 	},
 	SHR: func(op *Opcode, vm *VM) {
 		opr1 := op.opr1.(ReadWritableOperand)
-		if op.opr2.(*Counter).v == Count1 && isBit16(op.opr1) {
-			old := opr1.Read(vm)
-			res := old >> 1
-			opr1.Write(vm, res)
-			vm.SetFlag(CF, (old&1) == 1)
-			vm.SetFlag(OF, (old>>15) == 1)
-			vm.SetFlag(ZF, res == 0)
-			vm.SetFlag(SF, SignOf(res, opr1.Bit()) == 1)
-			vm.SetFlag(PF, ParityOf(res) == 1)
-		} else {
-			fmt.Fprintf(os.Stderr, "Not implemented: %s\n", op.Disasm())
-			os.Exit(1)
+		w := opr1.Bit()
+		count := op.opr2.(*Counter).Count(vm)
+		if count == 0 {
+			return
 		}
+		old := opr1.Read(vm) >> (count - 1)
+		res := old >> 1
+		opr1.Write(vm, res)
+		vm.SetFlag(CF, (old&1) == 1)
+		if count == 1 {
+			vm.SetFlag(OF, SignOf(old, w) == 1)
+		}
+		vm.SetFlag(ZF, res == 0)
+		vm.SetFlag(SF, SignOf(res, w) == 1)
+		vm.SetFlag(PF, ParityOf(res) == 1)
 	},
 	RCL: func(op *Opcode, vm *VM) {
 		opr1 := op.opr1.(ReadWritableOperand)

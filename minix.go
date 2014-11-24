@@ -8,22 +8,22 @@ import (
 )
 
 func CallMINIXSyscall(vm *VM) {
-	message := MinixMessage(vm.DS(vm.reg["bx"]))
-	syscallType := MINIXSyscall(message.Get(m_type))
-	DebugLog("syscall: %d, message: %02x\n", syscallType, message[0:24])
+	m := MinixMessage(vm.SS(vm.reg["bx"]))
+	syscallType := MINIXSyscall(m.Get(m_type))
+	DebugLog("syscall: %d, message: %02x\n", syscallType, m[0:24])
 	f := minixSyscallFuncMap[syscallType]
 	if f == nil {
 		fmt.Fprintf(os.Stderr, "Not implemented syscall: %d\n", syscallType)
 		os.Exit(1)
 	} else {
-		result, err := f(vm, message)
+		result, err := f(vm, m)
 		if err != nil {
 			result = -1
 		}
-		message.Set(m_type, int32(result))
+		m.Set(m_type, int32(result))
 		vm.reg["ax"] = uint16(result)
 	}
-	DebugLog("syscall: %d, message: %02x\n", syscallType, message[0:24])
+	DebugLog("syscall: %d, message: %02x\n", syscallType, m[0:24])
 }
 
 type MINIXSyscall int16
@@ -35,58 +35,88 @@ const (
 	MINIX_open  MINIXSyscall = 5
 	MINIX_close MINIXSyscall = 6
 	MINIX_time  MINIXSyscall = 13
+	MINIX_brk   MINIXSyscall = 17
+	MINIX_lseek MINIXSyscall = 19
+	MINIX_ioctl MINIXSyscall = 54
 )
 
 type MINIXSyscallFunc func(*VM, MinixMessage) (int, error)
 
 var minixSyscallFuncMap = map[MINIXSyscall]MINIXSyscallFunc{
-	MINIX_exit: func(vm *VM, message MinixMessage) (result int, err error) {
-		status := message.Get(m1_i1)
+	MINIX_exit: func(vm *VM, m MinixMessage) (result int, err error) {
+		status := m.Get(m1_i1)
 		syscall.Exit(int(status))
 		return
 	},
-	MINIX_read: func(vm *VM, message MinixMessage) (result int, err error) {
-		fd := message.Get(m1_i1)
-		nbytes := message.Get(m1_i2)
-		buffer := uint16(message.Get(m1_p1))
+	MINIX_read: func(vm *VM, m MinixMessage) (result int, err error) {
+		fd := m.Get(m1_i1)
+		nbytes := m.Get(m1_i2)
+		buffer := uint16(m.Get(m1_p1))
 		data := vm.DS(buffer)[0:nbytes]
 		result, err = syscall.Read(int(fd), data)
 		DebugLog("read : %04x %04x %04x data: %02x result: %04x", fd, nbytes, buffer, data[0:10], result)
 		return
 	},
-	MINIX_write: func(vm *VM, message MinixMessage) (result int, err error) {
-		fd := message.Get(m1_i1)
-		nbytes := message.Get(m1_i2)
-		buffer := uint16(message.Get(m1_p1))
+	MINIX_write: func(vm *VM, m MinixMessage) (result int, err error) {
+		fd := m.Get(m1_i1)
+		nbytes := m.Get(m1_i2)
+		buffer := uint16(m.Get(m1_p1))
 		data := vm.DS(buffer)[0:nbytes]
 		result, err = syscall.Write(int(fd), data)
 		DebugLog("write: %04x %04x %04x data: %02x result: %04x", fd, nbytes, buffer, data[0:10], result)
 		return
 	},
-	MINIX_open: func(vm *VM, message MinixMessage) (result int, err error) {
+	MINIX_open: func(vm *VM, m MinixMessage) (result int, err error) {
 		names := ""
-		flags := message.Get(m1_i2)
+		flags := m.Get(m1_i2)
 		if flags&syscall.O_CREAT != 0 {
 			os.Exit(1)
 		} else {
-			names = message.Get_m3_name(vm)
+			names = m.Get_m3_name(vm)
 		}
 
 		result, err = syscall.Open(names, int(flags), 0)
 		DebugLog("open : flags: %d names: %s result: %04x", flags, names, result)
 		return
 	},
-	MINIX_close: func(vm *VM, message MinixMessage) (result int, err error) {
-		fd := message.Get(m1_i1)
+	MINIX_close: func(vm *VM, m MinixMessage) (result int, err error) {
+		fd := m.Get(m1_i1)
 		result = 0
 		err = syscall.Close(int(fd))
 		DebugLog("close: fd: %04x result: %04x", fd, result)
 		return
 	},
-	MINIX_time: func(vm *VM, message MinixMessage) (result int, err error) {
+	MINIX_time: func(vm *VM, m MinixMessage) (result int, err error) {
 		time_t := time.Now().Unix()
 		DebugLog("time : %x", time_t)
-		message.Set(m2_l1, int32(time_t))
+		m.Set(m2_l1, int32(time_t))
+		return
+	},
+	MINIX_brk: func(vm *VM, m MinixMessage) (result int, err error) {
+		nd := m.Get(m1_p1)
+		if nd > 0x10000 || uint16(nd) >= vm.reg["sp"] {
+			result = -1
+		} else {
+			m.Set(m2_p1, nd)
+		}
+		DebugLog("brk  : nd: %04x result: %04x", nd, result)
+		return
+	},
+	MINIX_ioctl: func(vm *VM, m MinixMessage) (result int, err error) {
+		result = -1
+		return
+	},
+	MINIX_lseek: func(vm *VM, m MinixMessage) (result int, err error) {
+		fd := m.Get(m2_i1)
+		offset := m.Get(m2_l1)
+		whence := m.Get(m2_i2)
+		new_offset, err := syscall.Seek(int(fd), int64(offset), int(whence))
+		if err != nil {
+			result = -1
+		} else {
+			result = int(new_offset)
+		}
+		DebugLog("lseek: fd: %d, offset: %d, whence: %d, result: %04x", fd, offset, whence, result)
 		return
 	},
 }
@@ -136,10 +166,10 @@ func MinixStackArgs(vm *VM, args []string) {
 	stack = append(stack, 0x0)
 	stack[2+2*len(args)+2:].write(chars)
 
-	vm.DS(top).write(stack)
+	vm.SS(top).write(stack)
 	vm.reg["sp"] -= uint16(stack_len)
-	DebugLog("%04x", vm.reg["sp"])
-	DebugLog("%d", vm.DS(vm.reg["sp"])[0:stack_len])
+	DebugLog("SP: %04x", vm.reg["sp"])
+	DebugLog("Stack: %d", vm.SS(vm.reg["sp"])[0:stack_len])
 }
 
 type MinixMessage Bytes

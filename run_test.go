@@ -13,11 +13,11 @@ var opcodeADDwithOperandTests = []struct {
 }{
 	{AX, CX, 0x2244},
 	{AL, CL, 0x44},
-	{AX, NewMemory(nil, NewImmediate(0x1234, Unsign, Bit16), Bit16, nil), 0x0011 + 0x3534},
-	{AX, NewMemory([]*Register{BX}, NewImmediate(0x1234, Sign, Bit16), Bit16, nil), 0x0011 + 0x3736},
-	{AX, NewMemory([]*Register{BX, SI}, NewImmediate(0x1234, Sign, Bit16), Bit16, nil), 0x0011 + 0x3b3a},
-	{AL, NewMemory([]*Register{BX, SI}, NewImmediate(0x1234, Sign, Bit16), Bit8, nil), (0x0011 + 0x3b3a) & 0x00ff},
-	{NewMemory(nil, NewImmediate(0x0000, Unsign, Bit16), Bit8, nil), NewImmediate(0xff, Sign, Bit8), 0xff},
+	{AX, NewMemory(RegAdd_Direct, NewImmediate(0x1234, Unsign, Bit16), Bit16, nil), 0x0011 + 0x3534},
+	{AX, NewMemory(RegAdd_BX, NewImmediate(0x1234, Sign, Bit16), Bit16, nil), 0x0011 + 0x3736},
+	{AX, NewMemory(RegAdd_BX_SI, NewImmediate(0x1234, Sign, Bit16), Bit16, nil), 0x0011 + 0x3b3a},
+	{AL, NewMemory(RegAdd_BX_SI, NewImmediate(0x1234, Sign, Bit16), Bit8, nil), (0x0011 + 0x3b3a) & 0x00ff},
+	{NewMemory(RegAdd_Direct, NewImmediate(0x0000, Unsign, Bit16), Bit8, nil), NewImmediate(0xff, Sign, Bit8), 0xff},
 }
 
 func TestOpcodeADDwithOperand(t *testing.T) {
@@ -27,8 +27,8 @@ func TestOpcodeADDwithOperand(t *testing.T) {
 		CX.Write(vm, 0x2233)
 		BX.Write(vm, 0x0002)
 		SI.Write(vm, 0x0004)
-		for i, _ := range vm.memDS {
-			vm.memDS[i] = byte(i)
+		for i, _ := range vm.DS(0)[0:0xffff] {
+			vm.DS(0)[i] = byte(i)
 		}
 		op := Opcode{mn: ADD, opr1: test.opr1, opr2: test.opr2}
 		op.Run(vm)
@@ -493,5 +493,31 @@ func TestRunIncDecNeg(t *testing.T) {
 		assert.Equal(t, test.AF, vm.GetFlag(AF), "AF"+msg)
 		assert.Equal(t, test.ZF, vm.GetFlag(ZF), "ZF"+msg)
 		assert.Equal(t, test.SF, vm.GetFlag(SF), "SF"+msg)
+	}
+}
+
+var runDiv16Tests = []struct {
+	dx        uint16
+	ax        uint16
+	divisor   uint16
+	quotient  uint16
+	remainder uint16
+}{
+	{0x0000, 0x0002, 0x0002, 0x0001, 0x0000},
+	{0x0000, 0x0003, 0x0002, 0x0001, 0x0001},
+	{0x0001, 0x1172, 0x000a, 0x1b58, 0x0002},
+}
+
+func TestRunDiv16(t *testing.T) {
+	for _, test := range runDiv16Tests {
+		vm := NewVM()
+		DX.Write(vm, test.dx)
+		AX.Write(vm, test.ax)
+		BX.Write(vm, test.divisor)
+		op := Opcode{mn: DIV, opr1: BX}
+		op.Run(vm)
+		msg := fmt.Sprintf(" - %s %#04x DX:AX=%04x:%04x", op.mn, test.divisor, test.dx, test.ax)
+		assert.Equal(t, test.quotient, AX.Read(vm), "quotient"+msg)
+		assert.Equal(t, test.remainder, DX.Read(vm), "remainder"+msg)
 	}
 }

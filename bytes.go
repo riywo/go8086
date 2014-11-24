@@ -35,15 +35,53 @@ const (
 	RM111
 )
 
-var regAddress = [8][]*Register{
-	[]*Register{BX, SI},
-	[]*Register{BX, DI},
-	[]*Register{BP, SI},
-	[]*Register{BP, DI},
-	[]*Register{SI},
-	[]*Register{DI},
-	[]*Register{BP},
-	[]*Register{BX},
+type RegAddress int
+
+const (
+	RegAdd_Direct RegAddress = iota
+	RegAdd_BX_SI
+	RegAdd_BX_DI
+	RegAdd_BP_SI
+	RegAdd_BP_DI
+	RegAdd_SI
+	RegAdd_DI
+	RegAdd_BP
+	RegAdd_BX
+)
+
+var RMRegAddressMap = map[RM]RegAddress{
+	RM000: RegAdd_BX_SI,
+	RM001: RegAdd_BX_DI,
+	RM010: RegAdd_BP_SI,
+	RM011: RegAdd_BP_DI,
+	RM100: RegAdd_SI,
+	RM101: RegAdd_DI,
+	RM110: RegAdd_BP,
+	RM111: RegAdd_BX,
+}
+
+var RegAddressMap = map[RegAddress][]*Register{
+	RegAdd_Direct: []*Register{},
+	RegAdd_BX_SI:  []*Register{BX, SI},
+	RegAdd_BX_DI:  []*Register{BX, DI},
+	RegAdd_BP_SI:  []*Register{BP, SI},
+	RegAdd_BP_DI:  []*Register{BP, DI},
+	RegAdd_SI:     []*Register{SI},
+	RegAdd_DI:     []*Register{DI},
+	RegAdd_BP:     []*Register{BP},
+	RegAdd_BX:     []*Register{BX},
+}
+
+var RegAddressSegment = map[RegAddress]*SegmentRegister{
+	RegAdd_Direct: DS,
+	RegAdd_BX_SI:  DS,
+	RegAdd_BX_DI:  DS,
+	RegAdd_BP_SI:  SS,
+	RegAdd_BP_DI:  SS,
+	RegAdd_SI:     DS,
+	RegAdd_DI:     DS,
+	RegAdd_BP:     SS,
+	RegAdd_BX:     DS,
 }
 
 type SReg int
@@ -98,18 +136,18 @@ func (bs Bytes) modRM(mod Mod, reg Reg, rm RM, w Bit, sreg *SegmentRegister) (op
 	case Mod00:
 		if rm == RM110 {
 			imm := NewImmediate(bs[1:].read16(), Unsign, Bit16)
-			opr1 = NewMemory(nil, imm, w, sreg)
+			opr1 = NewMemory(RegAdd_Direct, imm, w, sreg)
 			readBytes = bs[0:3]
 		} else {
-			opr1 = NewMemory(regAddress[rm], nil, w, sreg)
+			opr1 = NewMemory(RMRegAddressMap[rm], nil, w, sreg)
 		}
 	case Mod01:
 		imm := NewImmediate(bs[1:].read8(), Sign, Bit8)
-		opr1 = NewMemory(regAddress[rm], imm, w, sreg)
+		opr1 = NewMemory(RMRegAddressMap[rm], imm, w, sreg)
 		readBytes = bs[0:2]
 	case Mod10:
 		imm := NewImmediate(bs[1:].read16(), Sign, Bit16)
-		opr1 = NewMemory(regAddress[rm], imm, w, sreg)
+		opr1 = NewMemory(RMRegAddressMap[rm], imm, w, sreg)
 		readBytes = bs[0:3]
 	case Mod11:
 		opr1 = getRegister(w, Reg(rm))
@@ -170,9 +208,9 @@ func (bs Bytes) GetOperandOfAccMem(w Bit, sreg *SegmentRegister) (opr1, opr2 Ope
 	readBytes = bs[0:2]
 	switch w {
 	case Bit8:
-		opr1, opr2 = AL, NewMemory(nil, imm, Bit8, sreg)
+		opr1, opr2 = AL, NewMemory(RegAdd_Direct, imm, Bit8, sreg)
 	case Bit16:
-		opr1, opr2 = AX, NewMemory(nil, imm, Bit16, sreg)
+		opr1, opr2 = AX, NewMemory(RegAdd_Direct, imm, Bit16, sreg)
 	}
 	return
 }

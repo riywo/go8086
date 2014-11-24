@@ -36,8 +36,8 @@ const (
 func Run(bs []byte, args []string) {
 	vm := NewVM()
 	aout := NewMinixAout(Bytes(bs))
-	vm.memCS.write(aout.text)
-	vm.memDS.write(aout.data)
+	vm.CS(0).write(aout.text)
+	vm.DS(0).write(aout.data)
 	MinixStackArgs(vm, args)
 	vm.Run()
 }

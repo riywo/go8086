@@ -57,7 +57,7 @@ var bytesmodRMTests = []struct {
 	{Mod00, Reg000, RM000, Bit8, ES, "[es:bx+si],al", 1},
 	{Mod00, Reg110, RM110, Bit8, CS, "[cs:0x12ff],dh", 3},
 	{Mod01, Reg000, RM000, Bit16, SS, "[ss:bx+si-0x1],ax", 2},
-	{Mod10, Reg111, RM111, Bit8, DS, "[ds:bx+0x12ff],bh", 3},
+	{Mod10, Reg111, RM010, Bit8, DS, "[ds:bp+si+0x12ff],bh", 3},
 }
 
 func TestBytesmodRM(t *testing.T) {

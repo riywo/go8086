@@ -211,15 +211,28 @@ func (c *Counter) Disasm() (asm string) {
 	return
 }
 
+func (c *Counter) Count(vm *VM) (n uint16) {
+	switch c.v {
+	case Count1:
+		n = 1
+	case CountCL:
+		n = CL.Read(vm)
+	}
+	return
+}
+
 type Memory struct {
-	regad []*Register
+	regad RegAddress
 	disp  *Immediate
 	w     Bit
 	sreg  *SegmentRegister
 }
 
-func NewMemory(regad []*Register, disp *Immediate, w Bit, sreg *SegmentRegister) *Memory {
+func NewMemory(regad RegAddress, disp *Immediate, w Bit, sreg *SegmentRegister) *Memory {
 	m := &Memory{regad: regad, disp: disp, w: w, sreg: sreg}
+	if sreg == nil {
+		m.sreg = RegAddressSegment[regad]
+	}
 	return m
 }
 
@@ -229,51 +242,57 @@ func (m *Memory) Bit() Bit {
 
 func (m *Memory) Disasm() string {
 	ea := ""
-	if len(m.regad) == 0 {
+	regad := RegAddressMap[m.regad]
+	if m.regad == RegAdd_Direct {
 		ea = m.disp.Disasm()
 	} else {
-		ea = m.regad[0].Disasm()
-		for _, reg := range m.regad[1:] {
+		ea = regad[0].Disasm()
+		for _, reg := range regad[1:] {
 			ea += "+" + reg.Disasm()
 		}
 		if m.disp != nil {
 			ea += m.disp.Disasm()
 		}
 	}
-	if m.sreg != nil {
+	if m.sreg != RegAddressSegment[m.regad] {
 		ea = m.sreg.Disasm() + ":" + ea
 	}
 	return "[" + ea + "]"
 }
 
 func (m *Memory) Read(vm *VM) (value uint16) {
-	ea := m.EffectiveAddress(vm)
 	switch m.w {
 	case Bit8:
-		value = vm.DS(ea).read8()
+		value = m.Mem(vm).read8()
 	case Bit16:
-		value = vm.DS(ea).read16()
+		value = m.Mem(vm).read16()
 	}
 	return
 }
 
 func (m *Memory) Write(vm *VM, value uint16) {
-	ea := m.EffectiveAddress(vm)
 	switch m.w {
 	case Bit8:
-		vm.DS(ea).write8(value)
+		m.Mem(vm).write8(value)
 	case Bit16:
-		vm.DS(ea).write16(value)
+		m.Mem(vm).write16(value)
 	}
 	return
 }
 
+func (m *Memory) Mem(vm *VM) (mem Bytes) {
+	ea := m.EffectiveAddress(vm)
+	sreg := m.sreg
+	return vm.Mem(sreg, ea)
+}
+
 func (m *Memory) EffectiveAddress(vm *VM) (ea uint16) {
-	if len(m.regad) == 0 {
+	regad := RegAddressMap[m.regad]
+	if len(regad) == 0 {
 		ea = m.disp.Read(vm)
 	} else {
-		ea = m.regad[0].Read(vm)
-		for _, reg := range m.regad[1:] {
+		ea = regad[0].Read(vm)
+		for _, reg := range regad[1:] {
 			ea += reg.Read(vm)
 		}
 		if m.disp != nil {

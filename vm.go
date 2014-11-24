@@ -20,21 +20,18 @@ const (
 )
 
 type VM struct {
-	reg    map[string]uint16
-	sreg   map[string]uint16
-	ip     uint16
-	flag   uint16
-	memCS  Bytes  //temporary
-	memDS  Bytes  //temporary
-	initSP uint16 //temporary
+	reg  map[string]uint16
+	sreg map[string]uint16
+	ip   uint16
+	flag uint16
+	mem  Bytes
 }
 
 func NewVM() (vm *VM) {
 	vm = new(VM)
 	vm.reg = make(map[string]uint16)
 	vm.sreg = make(map[string]uint16)
-	vm.memCS = make(Bytes, 0x10000) //temporary
-	vm.memDS = make(Bytes, 0x10000) //temporary
+	vm.mem = make(Bytes, 0x100000)
 	for _, reg := range regs[Bit16] {
 		switch reg {
 		case SP:
@@ -44,26 +41,45 @@ func NewVM() (vm *VM) {
 		}
 	}
 	for _, sreg := range sregs {
-		vm.sreg[sreg.name] = 0
+		switch sreg {
+		case CS:
+			vm.sreg[sreg.name] = 0x1000
+		default:
+			vm.sreg[sreg.name] = 0
+		}
 	}
+	DebugLog("CS: %04x SS: %04x DS: %04x ES: %04x", vm.sreg["cs"], vm.sreg["ss"], vm.sreg["ds"], vm.sreg["es"])
 	return
 }
 
+func (vm *VM) Mem(sreg *SegmentRegister, offset uint16) Bytes {
+	ea := (uint32(sreg.Read(vm)) << 4) + uint32(offset)
+	return vm.mem[ea:]
+}
+
 func (vm *VM) CS(offset uint16) Bytes {
-	return vm.memCS[offset:] //temporary
+	return vm.Mem(CS, offset)
 }
 
 func (vm *VM) DS(offset uint16) Bytes {
-	return vm.memDS[offset:] //temporary
+	return vm.Mem(DS, offset)
+}
+
+func (vm *VM) SS(offset uint16) Bytes {
+	return vm.Mem(SS, offset)
+}
+
+func (vm *VM) ES(offset uint16) Bytes {
+	return vm.Mem(ES, offset)
 }
 
 func (vm *VM) Push(value uint16) {
 	vm.reg["sp"] -= 2
-	vm.DS(vm.reg["sp"]).write16(value)
+	vm.SS(vm.reg["sp"]).write16(value)
 }
 
 func (vm *VM) Pop() (value uint16) {
-	value = vm.DS(vm.reg["sp"]).read16()
+	value = vm.SS(vm.reg["sp"]).read16()
 	vm.reg["sp"] += 2
 	return
 }
@@ -89,20 +105,19 @@ func (vm *VM) SetFlag(f Flag, condition bool) {
 }
 
 func (vm *VM) getOpcode() (op *Opcode) {
-	return getOpcode(nil, vm.ip, vm.memCS[vm.ip:])
+	return getOpcode(nil, vm.ip, vm.CS(vm.ip))
 }
 
 func (vm *VM) Run() {
-	vm.initSP = vm.reg["sp"]
 	for {
 		op := vm.getOpcode()
-		vm.Debug()
+		vm.Debug(op)
 		vm.ip += uint16(len(op.bytes))
 		op.Run(vm)
 	}
 }
 
-func (vm *VM) Debug() {
+func (vm *VM) Debug(op *Opcode) {
 	if !Debug {
 		return
 	}
@@ -112,19 +127,19 @@ func (vm *VM) Debug() {
 		vm.reg["ax"], vm.reg["cx"], vm.reg["dx"], vm.reg["bx"],
 		vm.reg["sp"], vm.reg["bp"], vm.reg["si"], vm.reg["di"],
 		f(OF), f(DF), f(IF), f(TF), f(SF), f(ZF), f(AF), f(PF), f(CF),
-		vm.getOpcode().Disasm(),
+		op.Disasm(),
 		vm.DebugStack(),
 	)
 }
 
 func (vm *VM) stackSlice() (s []uint16) {
-	top := vm.DS(vm.reg["sp"])
+	top := vm.reg["sp"]
 	for {
-		if len(top) < 0xffff-int(vm.initSP)+2 {
+		if top < vm.reg["sp"] {
 			return
 		}
-		s = append(s, top.read16())
-		top = top[2:]
+		s = append(s, vm.SS(top).read16())
+		top += 2
 	}
 }
 
