@@ -244,6 +244,11 @@ var opcodeRunFuncMap = map[Mnemonic]opcodeRunFunc{
 			vm.ip += op.opr1.(*Immediate).Read(vm)
 		}
 	},
+	JCXZ: func(op *Opcode, vm *VM) {
+		if CX.Read(vm) == 0 {
+			vm.ip += op.opr1.(*Immediate).Read(vm)
+		}
+	},
 	MUL: func(op *Opcode, vm *VM) {
 		opr := op.opr1.(ReadableOperand)
 		switch opr.Bit() {
@@ -339,7 +344,6 @@ var opcodeRunFuncMap = map[Mnemonic]opcodeRunFunc{
 		vm.FlagOFF(DF)
 	},
 	SCASB: func(op *Opcode, vm *VM) {
-		DebugLog("%02x", vm.ES(vm.reg["di"])[0:10])
 		a, b := AL.Read(vm), vm.ES(vm.reg["di"]).read8()
 		w := Bit8
 		res, cf, of := CalcADC(a, ^b, 1, w)
@@ -355,7 +359,6 @@ var opcodeRunFuncMap = map[Mnemonic]opcodeRunFunc{
 		}
 	},
 	CMPSB: func(op *Opcode, vm *VM) {
-		DebugLog("%02x", vm.ES(vm.reg["di"])[0:10])
 		a, b := vm.DS(vm.reg["si"]).read8(), vm.ES(vm.reg["di"]).read8()
 		w := Bit8
 		res, cf, of := CalcADC(a, ^b, 1, w)
@@ -370,6 +373,14 @@ var opcodeRunFuncMap = map[Mnemonic]opcodeRunFunc{
 		} else {
 			vm.reg["di"] += 1
 			vm.reg["si"] += 1
+		}
+	},
+	STOSB: func(op *Opcode, vm *VM) {
+		vm.ES(vm.reg["di"]).write8(AL.Read(vm))
+		if vm.GetFlag(DF) == 1 {
+			vm.reg["di"] -= 1
+		} else {
+			vm.reg["di"] += 1
 		}
 	},
 	MOVSB: func(op *Opcode, vm *VM) {
@@ -451,6 +462,39 @@ var opcodeRunFuncMap = map[Mnemonic]opcodeRunFunc{
 		vm.SetFlag(SF, SignOf(res, w) == 1)
 		vm.SetFlag(PF, ParityOf(res) == 1)
 	},
+	SAR: func(op *Opcode, vm *VM) {
+		opr1 := op.opr1.(ReadWritableOperand)
+		w := opr1.Bit()
+		count := op.opr2.(*Counter).Count(vm)
+		if count == 0 {
+			return
+		}
+		shiftR := func(x uint16) (res uint16) {
+			res = x >> 1
+			if SignOf(x, w) == 1 {
+				switch w {
+				case Bit8:
+					res |= 0x80
+				case Bit16:
+					res |= 0x8000
+				}
+			}
+			return
+		}
+		old := opr1.Read(vm)
+		for i := 0; i < int(count)-1; i++ {
+			old = shiftR(old)
+		}
+		res := shiftR(old)
+		opr1.Write(vm, res)
+		vm.SetFlag(CF, (old&1) == 1)
+		if count == 1 {
+			vm.FlagOFF(OF)
+		}
+		vm.SetFlag(ZF, res == 0)
+		vm.SetFlag(SF, SignOf(res, w) == 1)
+		vm.SetFlag(PF, ParityOf(res) == 1)
+	},
 	RCL: func(op *Opcode, vm *VM) {
 		opr1 := op.opr1.(ReadWritableOperand)
 		if op.opr2.(*Counter).v == Count1 && isBit16(op.opr1) {
@@ -462,6 +506,25 @@ var opcodeRunFuncMap = map[Mnemonic]opcodeRunFunc{
 			opr1.Write(vm, res)
 			vm.SetFlag(CF, (old>>15) == 1)
 			vm.SetFlag(OF, (res>>15)^vm.GetFlag(CF) == 1)
+			vm.SetFlag(ZF, res == 0)
+			vm.SetFlag(SF, SignOf(res, opr1.Bit()) == 1)
+			vm.SetFlag(PF, ParityOf(res) == 1)
+		} else {
+			fmt.Fprintf(os.Stderr, "Not implemented: %s\n", op.Disasm())
+			os.Exit(1)
+		}
+	},
+	RCR: func(op *Opcode, vm *VM) {
+		opr1 := op.opr1.(ReadWritableOperand)
+		if op.opr2.(*Counter).v == Count1 && isBit16(op.opr1) {
+			old := opr1.Read(vm)
+			res := old >> 1
+			if vm.GetFlag(CF) == 1 {
+				res = res | 0x8000
+			}
+			opr1.Write(vm, res)
+			vm.SetFlag(CF, (old&1) == 1)
+			vm.SetFlag(OF, (res&1)^(res&2) == 1)
 			vm.SetFlag(ZF, res == 0)
 			vm.SetFlag(SF, SignOf(res, opr1.Bit()) == 1)
 			vm.SetFlag(PF, ParityOf(res) == 1)

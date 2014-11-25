@@ -29,15 +29,24 @@ func CallMINIXSyscall(vm *VM) {
 type MINIXSyscall int16
 
 const (
-	MINIX_exit  MINIXSyscall = 1
-	MINIX_read  MINIXSyscall = 3
-	MINIX_write MINIXSyscall = 4
-	MINIX_open  MINIXSyscall = 5
-	MINIX_close MINIXSyscall = 6
-	MINIX_time  MINIXSyscall = 13
-	MINIX_brk   MINIXSyscall = 17
-	MINIX_lseek MINIXSyscall = 19
-	MINIX_ioctl MINIXSyscall = 54
+	MINIX_exit      MINIXSyscall = 1
+	MINIX_read      MINIXSyscall = 3
+	MINIX_write     MINIXSyscall = 4
+	MINIX_open      MINIXSyscall = 5
+	MINIX_close     MINIXSyscall = 6
+	MINIX_creat     MINIXSyscall = 8
+	MINIX_unlink    MINIXSyscall = 10
+	MINIX_time      MINIXSyscall = 13
+	MINIX_chmod     MINIXSyscall = 15
+	MINIX_brk       MINIXSyscall = 17
+	MINIX_stat      MINIXSyscall = 18
+	MINIX_lseek     MINIXSyscall = 19
+	MINIX_getpid    MINIXSyscall = 20
+	MINIX_getuid    MINIXSyscall = 24
+	MINIX_access    MINIXSyscall = 33
+	MINIX_getgid    MINIXSyscall = 47
+	MINIX_ioctl     MINIXSyscall = 54
+	MINIX_sigaction MINIXSyscall = 71
 )
 
 type MINIXSyscallFunc func(*VM, MinixMessage) (int, error)
@@ -86,10 +95,30 @@ var minixSyscallFuncMap = map[MINIXSyscall]MINIXSyscallFunc{
 		DebugLog("close: fd: %04x result: %04x", fd, result)
 		return
 	},
+	MINIX_creat: func(vm *VM, m MinixMessage) (result int, err error) {
+		mode := m.Get(m3_i2)
+		names := m.Get_m3_name(vm)
+		result, err = syscall.Open(names, syscall.O_WRONLY|syscall.O_CREAT|syscall.O_TRUNC, uint32(mode))
+		DebugLog("creat : mode: %d names: %s result: %04x err: %v", mode, names, result, err)
+		return
+	},
+	MINIX_unlink: func(vm *VM, m MinixMessage) (result int, err error) {
+		names := m.Get_m3_name(vm)
+		err = syscall.Unlink(names)
+		DebugLog("unlink : %s, %v", names, err)
+		return
+	},
 	MINIX_time: func(vm *VM, m MinixMessage) (result int, err error) {
 		time_t := time.Now().Unix()
 		DebugLog("time : %x", time_t)
 		m.Set(m2_l1, int32(time_t))
+		return
+	},
+	MINIX_chmod: func(vm *VM, m MinixMessage) (result int, err error) {
+		mode := m.Get(m3_i2)
+		names := m.Get_m3_name(vm)
+		err = syscall.Chmod(names, uint32(mode))
+		DebugLog("chmod : mode: %d names: %s result: %04x", mode, names, result)
 		return
 	},
 	MINIX_brk: func(vm *VM, m MinixMessage) (result int, err error) {
@@ -102,8 +131,25 @@ var minixSyscallFuncMap = map[MINIXSyscall]MINIXSyscallFunc{
 		DebugLog("brk  : nd: %04x result: %04x", nd, result)
 		return
 	},
-	MINIX_ioctl: func(vm *VM, m MinixMessage) (result int, err error) {
-		result = -1
+	MINIX_stat: func(vm *VM, m MinixMessage) (result int, err error) {
+		bytes := m.Get(m1_i1)
+		name := m.Get(m1_p1)
+		buf := m.Get(m1_p2)
+		names := string(vm.SS(uint16(name))[0 : bytes-1])
+		stat := syscall.Stat_t{}
+		err = syscall.Stat(names, &stat)
+		vm.SS(uint16(buf))[0:].write16(uint16(stat.Dev))
+		vm.SS(uint16(buf))[2:].write16(uint16(stat.Ino))
+		vm.SS(uint16(buf))[4:].write16(uint16(stat.Mode))
+		vm.SS(uint16(buf))[6:].write16(uint16(stat.Nlink))
+		vm.SS(uint16(buf))[8:].write16(uint16(stat.Uid))
+		vm.SS(uint16(buf))[10:].write16(uint16(stat.Gid))
+		vm.SS(uint16(buf))[12:].write16(uint16(stat.Rdev))
+		vm.SS(uint16(buf))[14:].write32(uint32(stat.Size))
+		vm.SS(uint16(buf))[18:].write32(uint32(stat.Atimespec.Sec))
+		vm.SS(uint16(buf))[22:].write32(uint32(stat.Mtimespec.Sec))
+		vm.SS(uint16(buf))[26:].write32(uint32(stat.Ctimespec.Sec))
+		DebugLog("stat : names: %s stat: %+v err: %v", names, stat, err)
 		return
 	},
 	MINIX_lseek: func(vm *VM, m MinixMessage) (result int, err error) {
@@ -111,12 +157,38 @@ var minixSyscallFuncMap = map[MINIXSyscall]MINIXSyscallFunc{
 		offset := m.Get(m2_l1)
 		whence := m.Get(m2_i2)
 		new_offset, err := syscall.Seek(int(fd), int64(offset), int(whence))
-		if err != nil {
-			result = -1
-		} else {
-			result = int(new_offset)
-		}
-		DebugLog("lseek: fd: %d, offset: %d, whence: %d, result: %04x", fd, offset, whence, result)
+		m.Set(m2_l1, int32(new_offset))
+		DebugLog("lseek: fd: %d, offset: %d, whence: %d, new_offset: %08x", fd, offset, whence, new_offset)
+		return
+	},
+	MINIX_getpid: func(vm *VM, m MinixMessage) (result int, err error) {
+		pid := syscall.Getpid()
+		result = (pid << 4) % 30000
+		DebugLog("getpid : result: %04x", result)
+		return
+	},
+	MINIX_getuid: func(vm *VM, m MinixMessage) (result int, err error) {
+		result = syscall.Getuid()
+		DebugLog("getuid : result: %04x", result)
+		return
+	},
+	MINIX_access: func(vm *VM, m MinixMessage) (result int, err error) {
+		mode := m.Get(m3_i2)
+		names := m.Get_m3_name(vm)
+		err = syscall.Access(names, uint32(mode))
+		DebugLog("access : mode: %d names: %s result: %04x", mode, names, result)
+		return
+	},
+	MINIX_getgid: func(vm *VM, m MinixMessage) (result int, err error) {
+		result = syscall.Getgid()
+		DebugLog("getgid : result: %04x", result)
+		return
+	},
+	MINIX_ioctl: func(vm *VM, m MinixMessage) (result int, err error) {
+		result = -1
+		return
+	},
+	MINIX_sigaction: func(vm *VM, m MinixMessage) (result int, err error) {
 		return
 	},
 }

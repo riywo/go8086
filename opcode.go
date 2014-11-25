@@ -239,6 +239,15 @@ func (op *Opcode) Disasm() (asm string) {
 func (op *Opcode) Run(vm *VM) {
 	switch op.mn {
 	case REPNE:
+		s := ""
+		data := vm.ES(vm.reg["di"])
+		if op.following.mn == MOVSB {
+			data = vm.DS(vm.reg["si"])
+		}
+		for _, c := range data[0:50] {
+			s += fmt.Sprintf("%c", c)
+		}
+		DebugLog("rep %s: %s", op.following.Disasm(), s)
 		for {
 			op.following.Run(vm)
 			CX.Write(vm, CX.Read(vm)-1)

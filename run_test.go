@@ -496,27 +496,31 @@ func TestRunIncDecNeg(t *testing.T) {
 	}
 }
 
-var runDiv16Tests = []struct {
+var runDivIdiv16Tests = []struct {
+	mn        Mnemonic
 	dx        uint16
 	ax        uint16
 	divisor   uint16
 	quotient  uint16
 	remainder uint16
 }{
-	{0x0000, 0x0002, 0x0002, 0x0001, 0x0000},
-	{0x0000, 0x0003, 0x0002, 0x0001, 0x0001},
-	{0x0001, 0x1172, 0x000a, 0x1b58, 0x0002},
+	{DIV, 0x0000, 0x0002, 0x0002, 0x0001, 0x0000},
+	{DIV, 0x0000, 0x0003, 0x0002, 0x0001, 0x0001},
+	{DIV, 0x0001, 0x1172, 0x000a, 0x1b58, 0x0002},
+	{IDIV, 0x0000, 0x0002, 0x0002, 0x0001, 0x0000},
+	{IDIV, 0x0000, 0x0003, 0x0002, 0x0001, 0x0001},
+	{IDIV, 0xffff, 0xfff7, 0x0004, 0xfffe, 0xffff},
 }
 
-func TestRunDiv16(t *testing.T) {
-	for _, test := range runDiv16Tests {
+func TestRunDivIdiv16(t *testing.T) {
+	for _, test := range runDivIdiv16Tests {
 		vm := NewVM()
 		DX.Write(vm, test.dx)
 		AX.Write(vm, test.ax)
 		BX.Write(vm, test.divisor)
-		op := Opcode{mn: DIV, opr1: BX}
+		op := Opcode{mn: test.mn, opr1: BX}
 		op.Run(vm)
-		msg := fmt.Sprintf(" - %s %#04x DX:AX=%04x:%04x", op.mn, test.divisor, test.dx, test.ax)
+		msg := fmt.Sprintf(" - %s %#04x DX:AX=%04x:%04x", test.mn, test.divisor, test.dx, test.ax)
 		assert.Equal(t, test.quotient, AX.Read(vm), "quotient"+msg)
 		assert.Equal(t, test.remainder, DX.Read(vm), "remainder"+msg)
 	}
