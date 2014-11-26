@@ -3,6 +3,7 @@ package go8086
 import (
 	"fmt"
 	"os"
+	"strconv"
 )
 
 type Mnemonic int
@@ -247,7 +248,7 @@ func (op *Opcode) Run(vm *VM) {
 		for _, c := range data[0:50] {
 			s += fmt.Sprintf("%c", c)
 		}
-		DebugLog("rep %s: %s", op.following.Disasm(), s)
+		DebugLog("rep %s: %s", op.following.Disasm(), strconv.Quote(s))
 		for {
 			op.following.Run(vm)
 			CX.Write(vm, CX.Read(vm)-1)

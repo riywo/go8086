@@ -33,21 +33,14 @@ const (
 	ToReg
 )
 
-func Run(bs []byte, args []string) {
-	vm := NewVM()
-	aout := NewMinixAout(Bytes(bs))
-	vm.CS(0).write(aout.text)
-	vm.DS(0).write(aout.data)
-	MinixStackArgs(vm, args)
+func Run(file string, args, env []string) {
+	aout := NewMinixAout(file)
+	vm := aout.NewVM(args, env)
 	vm.Run()
 }
 
-var Debug bool = false
-
-func DebugLog(format string, a ...interface{}) {
-	if Debug {
-		fmt.Fprintln(os.Stderr, "")
-		fmt.Fprintf(os.Stderr, "[Debug] "+format, a...)
-		fmt.Fprintln(os.Stderr, "")
-	}
+func ErrorLog(format string, a ...interface{}) {
+	log := fmt.Sprintf("%d [Error] ", Pid())
+	log += fmt.Sprintf(format, a...)
+	fmt.Fprintln(os.Stderr, log)
 }

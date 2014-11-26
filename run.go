@@ -121,6 +121,11 @@ var opcodeRunFuncMap = map[Mnemonic]opcodeRunFunc{
 		vm.SetFlag(SF, SignOf(res, w) == 1)
 		vm.SetFlag(PF, ParityOf(res) == 1)
 	},
+	NOT: func(op *Opcode, vm *VM) {
+		opr1 := op.opr1.(ReadWritableOperand)
+		res := ^opr1.Read(vm)
+		opr1.Write(vm, res)
+	},
 	NEG: func(op *Opcode, vm *VM) {
 		opr1 := op.opr1.(ReadWritableOperand)
 		w := opr1.Bit()
@@ -167,13 +172,16 @@ var opcodeRunFuncMap = map[Mnemonic]opcodeRunFunc{
 		vm.SetFlag(PF, ParityOf(res) == 1)
 	},
 	TEST: func(op *Opcode, vm *VM) {
-		opr1 := op.opr1.(ReadableOperand)
-		old := opr1.Read(vm)
-		res := old & op.opr2.(ReadableOperand).Read(vm)
+		opr1 := op.opr1.(ReadWritableOperand)
+		opr2 := op.opr2.(ReadableOperand)
+		w := opr1.Bit()
+		a, b := opr1.Read(vm), opr2.Read(vm)
+		res := a & b
+		DebugLog("a: %04x b: %04x res: %04x", a, b, res)
 		vm.FlagOFF(CF)
 		vm.FlagOFF(OF)
 		vm.SetFlag(ZF, res == 0)
-		vm.SetFlag(SF, SignOf(res, opr1.Bit()) == 1)
+		vm.SetFlag(SF, SignOf(res, w) == 1)
 		vm.SetFlag(PF, ParityOf(res) == 1)
 	},
 	MOV: func(op *Opcode, vm *VM) {
@@ -310,8 +318,14 @@ var opcodeRunFuncMap = map[Mnemonic]opcodeRunFunc{
 	PUSH: func(op *Opcode, vm *VM) {
 		vm.Push(op.opr1.(ReadableOperand).Read(vm))
 	},
+	PUSHF: func(op *Opcode, vm *VM) {
+		vm.Push(vm.flag)
+	},
 	POP: func(op *Opcode, vm *VM) {
 		op.opr1.(WritableOperand).Write(vm, vm.Pop())
+	},
+	POPF: func(op *Opcode, vm *VM) {
+		vm.flag = vm.Pop()
 	},
 	CALL: func(op *Opcode, vm *VM) {
 		vm.Push(vm.ip)
@@ -339,6 +353,9 @@ var opcodeRunFuncMap = map[Mnemonic]opcodeRunFunc{
 		if vm.reg["cx"] != 0 {
 			vm.ip += op.opr1.(ReadableOperand).Read(vm)
 		}
+	},
+	STD: func(op *Opcode, vm *VM) {
+		vm.FlagON(DF)
 	},
 	CLD: func(op *Opcode, vm *VM) {
 		vm.FlagOFF(DF)
@@ -405,7 +422,8 @@ var opcodeRunFuncMap = map[Mnemonic]opcodeRunFunc{
 	},
 	CBW: func(op *Opcode, vm *VM) {
 		src := int8(AL.Read(vm))
-		vm.reg["ax"] = uint16(src)
+		dst := int16(src)
+		vm.reg["ax"] = uint16(dst)
 	},
 	CWD: func(op *Opcode, vm *VM) {
 		src := int16(AX.Read(vm))

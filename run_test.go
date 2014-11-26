@@ -525,3 +525,22 @@ func TestRunDivIdiv16(t *testing.T) {
 		assert.Equal(t, test.remainder, DX.Read(vm), "remainder"+msg)
 	}
 }
+
+var runCbwTests = []struct {
+	al uint16
+	ax uint16
+}{
+	{0x01, 0x0001},
+	{0x8c, 0xff8c},
+}
+
+func TestRunCbw(t *testing.T) {
+	for _, test := range runCbwTests {
+		vm := NewVM()
+		AL.Write(vm, test.al)
+		op := Opcode{mn: CBW}
+		op.Run(vm)
+		msg := fmt.Sprintf(" - %s AL: %02x", CBW, test.al)
+		assert.Equal(t, test.ax, AX.Read(vm), "AX"+msg)
+	}
+}
